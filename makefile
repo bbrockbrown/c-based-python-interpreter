@@ -11,7 +11,7 @@ valgrind:
 	valgrind --tool=memcheck --leak-check=no --track-origins=yes ./a.out "$(file)"
 
 submit:
-	/home/cs211/f2024/tools/project07  submit  main.c  execute.c
+	/home/cs211/f2024/tools/project08  submit  main.c  execute.c
 
 commit:
 	git add .
