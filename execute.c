@@ -315,6 +315,24 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		return false;
 	}
 
+	// if we are doing ptr (addr) + int
+	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT) {
+		result->value_type = RAM_TYPE_PTR;
+
+		// addition
+		if (operator == OPERATOR_PLUS) {
+			result->types.i = lhs.types.i + rhs.types.i;
+		}
+		else if (operator == OPERATOR_MINUS) {
+			result->types.i = lhs.types.i - rhs.types.i;
+		}
+		else {
+			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
+			return false;
+		}
+		return true;
+	}
+
 	// if we are doing something with real and int --> convert int to real
 	if (lhs.value_type == RAM_TYPE_INT && rhs.value_type == RAM_TYPE_REAL) {
 		lhs.types.d = (double)lhs.types.i;
@@ -424,9 +442,29 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE* value, bool* success, int line_num) {
 	*success = false;
       struct ELEMENT* element = op->element;
+
+	// check if operator is '&'
+	if (op->expr_type == UNARY_ADDRESS_OF) {
+		if (element->element_type != ELEMENT_IDENTIFIER) {
+				printf("**SEMANTIC ERROR: '&' can only be used with an identifier (line %d)\n", line_num);
+				return false;
+			}
+
+		char* name = element->element_value;
+		int addr = ram_get_addr(memory, name);
+		// make sure memory address is valid
+		if (addr == -1) {
+			printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", name, line_num);
+			return false;
+		}
+
+		value->value_type = RAM_TYPE_PTR;
+		value->types.i = addr;
+		*success = true;
+		return true;
+	}
 	
 	switch (element->element_type) {
-
 		// elt is an int literal
 		case ELEMENT_INT_LITERAL: {
 			value->value_type = RAM_TYPE_INT;
@@ -434,6 +472,9 @@ bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE*
 			*success = true;
 			return true;
 		}
+
+		// elt is the '&' operator
+		
 
 		// elt is a real literal
 		case ELEMENT_REAL_LITERAL: {
@@ -553,9 +594,38 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	// prepare ram to store this
 	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE};
 
+	// check if it is '&'
+	if (rhs->value_type == VALUE_EXPR && rhs->types.expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+		struct UNARY_EXPR* lhs = rhs->types.expr->lhs;
+		bool success = false;
+
+		if (!retrieve_value(lhs, memory, &stored_value, &success, stmt->line)) {
+			return false;
+		}
+
+		if (success) {
+			stored_value.value_type = RAM_TYPE_PTR;
+		}
+	}
+
+	else if (rhs->value_type == VALUE_EXPR) {
+		struct EXPR* expr = rhs->types.expr;
+		if (expr->isBinaryExpr) {
+			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
+
+			if (!success) {
+				return false;
+			}
+
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
+				stored_value.value_type = RAM_TYPE_PTR;
+			}
+		}
+	}
+
 
 	// check if its a function call
-	if (rhs->value_type == VALUE_FUNCTION_CALL) {
+	else if (rhs->value_type == VALUE_FUNCTION_CALL) {
 		if (!handle_function(rhs->types.function_call, &stored_value, memory, stmt->line)) {
 			return false;
 		}
@@ -668,6 +738,9 @@ bool execute_function_call(struct STMT* stmt, struct RAM* memory) {
 							break;
 						case RAM_TYPE_STR:
 							printf("%s\n", value->types.s);
+							break;
+						case RAM_TYPE_PTR:
+							printf("%d\n", value->types.i);
 							break;
 						default:
 							printf("**ERROR: Unsupported variable type for '%s'\n", parameter->element_value);
