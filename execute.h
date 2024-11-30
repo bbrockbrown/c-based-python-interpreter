@@ -64,7 +64,7 @@ bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
 // all types of variables when doing +, -, *, /, **, and %. 
 //
-bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
+bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory);
 
 //
 // retrieve_value

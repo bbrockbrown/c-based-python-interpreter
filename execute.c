@@ -296,7 +296,7 @@ bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
 // all types of variables when doing +, -, *, /, **, and %. 
 //
-bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
+bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory) {
 	// see what types are in the operation
 	if (lhs.value_type == RAM_TYPE_STR || rhs.value_type == RAM_TYPE_STR) {
 		// both operands are strings and operation is (+) --> string concat
@@ -317,20 +317,37 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 
 	// if we are doing ptr (addr) + int
 	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT) {
-		result->value_type = RAM_TYPE_PTR;
+		int new_addr = lhs.types.i;
 
 		// addition
 		if (operator == OPERATOR_PLUS) {
-			result->types.i = lhs.types.i + rhs.types.i;
+			new_addr += rhs.types.i;
 		}
+		// subtraction
 		else if (operator == OPERATOR_MINUS) {
-			result->types.i = lhs.types.i - rhs.types.i;
+			new_addr -= rhs.types.i;
 		}
+		// unsupported
 		else {
 			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
 			return false;
 		}
+
+		// make sure the address is in bounds
+		if (new_addr < 0 || new_addr >= memory->capacity) {
+			printf("**SEMANTIC ERROR: new address '%d' is out of bounds for memory (line %d)\n", new_addr, line_num);
+			return false;
+		}
+
+		result->value_type = RAM_TYPE_PTR;
+		result->types.i = new_addr;
 		return true;
+	}
+
+	// check for invalid pointer operation
+	if (lhs.value_type == RAM_TYPE_PTR || rhs.value_type == RAM_TYPE_PTR) {
+		printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
+		return false;
 	}
 
 	// if we are doing something with real and int --> convert int to real
@@ -572,7 +589,7 @@ bool execute_binary_expression(struct EXPR* expr, struct RAM_VALUE* result, stru
 		return false;
 	}
 
-	return determine_op_result(expr->operator, lhs_val, rhs_val, result, line_num);
+	return determine_op_result(expr->operator, lhs_val, rhs_val, result, line_num, memory);
 }
 
 //
@@ -594,38 +611,9 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	// prepare ram to store this
 	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE};
 
-	// check if it is '&'
-	if (rhs->value_type == VALUE_EXPR && rhs->types.expr->lhs->expr_type == UNARY_ADDRESS_OF) {
-		struct UNARY_EXPR* lhs = rhs->types.expr->lhs;
-		bool success = false;
-
-		if (!retrieve_value(lhs, memory, &stored_value, &success, stmt->line)) {
-			return false;
-		}
-
-		if (success) {
-			stored_value.value_type = RAM_TYPE_PTR;
-		}
-	}
-
-	else if (rhs->value_type == VALUE_EXPR) {
-		struct EXPR* expr = rhs->types.expr;
-		if (expr->isBinaryExpr) {
-			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
-
-			if (!success) {
-				return false;
-			}
-
-			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
-				stored_value.value_type = RAM_TYPE_PTR;
-			}
-		}
-	}
-
 
 	// check if its a function call
-	else if (rhs->value_type == VALUE_FUNCTION_CALL) {
+	if (rhs->value_type == VALUE_FUNCTION_CALL) {
 		if (!handle_function(rhs->types.function_call, &stored_value, memory, stmt->line)) {
 			return false;
 		}
@@ -635,17 +623,34 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	else if (rhs->value_type == VALUE_EXPR) {
 		struct EXPR* expr = rhs->types.expr;
 
-		if (!expr->isBinaryExpr) {
-			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
+		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+			struct UNARY_EXPR* lhs = expr->lhs;
+			bool success = false;
+
+			if (!retrieve_value(lhs, memory, &stored_value, &success, stmt->line)) {
 				return false;
+			}
+
+			if (success) {
+				stored_value.value_type = RAM_TYPE_PTR;
 			}
 		}
 
-		else {
+		else if (expr->isBinaryExpr) {
 			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
 
 			// make sure expr executed
 			if (!success) {
+				return false;
+			}
+
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
+				stored_value.value_type = RAM_TYPE_PTR;
+			}
+		}
+
+		else {
+			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
 				return false;
 			}
 		}
