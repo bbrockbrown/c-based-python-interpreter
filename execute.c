@@ -315,6 +315,43 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		return false;
 	}
 
+	// deref lhs if ptr
+	if (lhs.value_type == RAM_TYPE_PTR) {
+		int addr = lhs.types.i;
+		if (addr < 0 || addr >= memory->capacity) {
+			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+			return false;
+		}
+		
+		struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+		if (!deref_val) {
+			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+			return false;
+		}
+
+		lhs = *deref_val;
+		ram_free_value(deref_val);
+	}
+
+	// deref rhs if ptr
+	if (lhs.value_type == RAM_TYPE_PTR) {
+		int addr = rhs.types.i;
+		if (addr < 0 || addr >= memory->capacity) {
+			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+			return false;
+		}
+		
+		struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+		if (!deref_val) {
+			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+			return false;
+		}
+
+		rhs = *deref_val;
+		ram_free_value(deref_val);
+	}
+
+
 	// if we are doing ptr (addr) + int
 	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT) {
 		int new_addr = lhs.types.i;
@@ -330,12 +367,6 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		// unsupported
 		else {
 			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
-			return false;
-		}
-
-		// make sure the address is in bounds
-		if (new_addr < 0 || new_addr >= memory->capacity) {
-			printf("**SEMANTIC ERROR: new address '%d' is out of bounds for memory (line %d)\n", new_addr, line_num);
 			return false;
 		}
 
@@ -463,9 +494,9 @@ bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE*
 	// check if operator is '&'
 	if (op->expr_type == UNARY_ADDRESS_OF) {
 		if (element->element_type != ELEMENT_IDENTIFIER) {
-				printf("**SEMANTIC ERROR: '&' can only be used with an identifier (line %d)\n", line_num);
-				return false;
-			}
+			printf("**SEMANTIC ERROR: '&' can only be used with an identifier (line %d)\n", line_num);
+			return false;
+		}
 
 		char* name = element->element_value;
 		int addr = ram_get_addr(memory, name);
@@ -477,6 +508,39 @@ bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE*
 
 		value->value_type = RAM_TYPE_PTR;
 		value->types.i = addr;
+		*success = true;
+		return true;
+	}
+
+	// check if operatort is '*'
+	if (op->expr_type == UNARY_PTR_DEREF) {
+		char* name = element->element_value;
+		struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, name);
+		// make sure the ptr is valid
+		if (!ptr_val) {
+			printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", name, line_num);
+			return false;
+		}
+		// make sure var is actually a ptr
+		if (ptr_val->value_type != RAM_TYPE_PTR) {
+			printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+			return false;
+		}
+		// make sure addr of ptr is within memory range
+		int addr = ptr_val->types.i;
+		if (addr < 0 || addr >= memory->capacity) {
+			printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", name, line_num);
+			return false;
+		}
+		// make sure deref val is valid
+		struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+		if (!deref_val) {
+			printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", name, line_num);
+			return false;
+		}
+
+		*value = *deref_val;
+		ram_free_value(deref_val);
 		*success = true;
 		return true;
 	}
@@ -623,7 +687,21 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	else if (rhs->value_type == VALUE_EXPR) {
 		struct EXPR* expr = rhs->types.expr;
 
-		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+		if (expr->isBinaryExpr) {
+			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
+
+			// make sure expr executed
+			if (!success) {
+				return false;
+			}
+
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
+				stored_value.value_type = RAM_TYPE_PTR;
+			}
+		}
+
+		// '&' operator
+		else if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
 			struct UNARY_EXPR* lhs = expr->lhs;
 			bool success = false;
 
@@ -636,17 +714,36 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 			}
 		}
 
-		else if (expr->isBinaryExpr) {
-			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
+		else if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
+			char* ptr_name = expr->lhs->element->element_value;
+			struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
 
-			// make sure expr executed
-			if (!success) {
+			// make sure ptr is valid
+			if (!ptr_val) {
+				printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, stmt->line);
 				return false;
 			}
 
-			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
-				stored_value.value_type = RAM_TYPE_PTR;
+			// check if the variable is actually a pointer
+			if (ptr_val->value_type != RAM_TYPE_PTR) {
+				printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", stmt->line);
+				return false;
 			}
+
+			int addr = ptr_val->types.i;
+			if (addr < 0 || addr >= memory->capacity) {
+				printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
+				return false;
+			}
+
+			struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+			if (!deref_val) {
+				printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
+				return false;
+			}
+
+			stored_value = *deref_val;
+			ram_free_value(deref_val);
 		}
 
 		else {
