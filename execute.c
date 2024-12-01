@@ -672,9 +672,61 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 
 	// get var name
 	char* name = assignment->var_name;
-	// prepare ram to store this
-	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE};
 
+	// prepare ram to store this
+	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE };
+
+	// check if we are doing pointer-based assignment (*p = ...)
+	if (assignment->isPtrDeref) {
+		char* ptr_name = assignment->var_name;
+
+		// make sure ptr exists
+		struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
+		if (!ptr_val) {
+			printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, stmt->line);
+			return false;
+		}
+
+		// make sure var == ptr
+		if (ptr_val->value_type != RAM_TYPE_PTR) {
+			printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", stmt->line);
+			return false;
+		}
+
+		// make sure addr in range
+		int addr = ptr_val->types.i;
+		if (addr < 0 || addr >= memory->capacity) {
+			printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
+			return false;
+		}
+
+		// do rhs
+		if (rhs->value_type == VALUE_FUNCTION_CALL) {
+			if (!handle_function(rhs->types.function_call, &stored_value, memory, stmt->line)) {
+				return false;
+			}
+		} else if (rhs->value_type == VALUE_EXPR) {
+			struct EXPR* expr = rhs->types.expr;
+
+			if (expr->isBinaryExpr) {
+				if (!execute_binary_expression(expr, &stored_value, memory, stmt->line)) {
+					return false;
+				}
+				} else {
+				if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
+					return false;
+				}
+			}
+		}
+
+		// make sure dereferencing works
+		if (!ram_write_cell_by_addr(memory, stored_value, addr)) {
+			printf("**ERROR: Could not write value to memory location\n");
+			return false;
+		}
+
+		return true; // Successful pointer-based assignment, no need to modify pointer itself
+	}
 
 	// check if its a function call
 	if (rhs->value_type == VALUE_FUNCTION_CALL) {
@@ -682,7 +734,6 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 			return false;
 		}
 	}
-
 	// check if we are dealing with binary expr or normal assignment
 	else if (rhs->value_type == VALUE_EXPR) {
 		struct EXPR* expr = rhs->types.expr;
@@ -695,7 +746,9 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 				return false;
 			}
 
-			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER && expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
+			// check if lhs and rhs indicate pointer arithmetic
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
+			expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
 				stored_value.value_type = RAM_TYPE_PTR;
 			}
 		}
@@ -714,6 +767,7 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 			}
 		}
 
+		// '*' operator (dereference)
 		else if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
 			char* ptr_name = expr->lhs->element->element_value;
 			struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
@@ -746,17 +800,17 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 			ram_free_value(deref_val);
 		}
 
+		// normal expression
 		else {
 			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
 				return false;
 			}
 		}
-		
 	}
 
 	// write our value to memory
 	if (!ram_write_cell_by_name(memory, stored_value, name)) {
-		printf("**ERROR: Could not write variable to memory. Variable: %s", name);
+		printf("**ERROR: Could not write variable to memory. Variable: %s\n", name);
 		if (stored_value.value_type == RAM_TYPE_STR) {
 			free(stored_value.types.s);
 		}
@@ -766,6 +820,7 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	// successful assignment
 	return true;
 }
+
 
 //
 // execute_function_call
