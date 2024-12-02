@@ -296,7 +296,7 @@ bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
 // all types of variables when doing +, -, *, /, **, and %. 
 //
-bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory) {
+bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory, bool lhs_deref, bool rhs_deref) {
 	// see what types are in the operation
 	if (lhs.value_type == RAM_TYPE_STR || rhs.value_type == RAM_TYPE_STR) {
 		// both operands are strings and operation is (+) --> string concat
@@ -315,8 +315,8 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		return false;
 	}
 
-	// deref lhs if ptr
-	if (lhs.value_type == RAM_TYPE_PTR) {
+	// check if we are dereferencing the lhs
+	if (lhs.value_type == RAM_TYPE_PTR && lhs_deref) {
 		int addr = lhs.types.i;
 		if (addr < 0 || addr >= memory->capacity) {
 			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
@@ -333,8 +333,8 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		ram_free_value(deref_val);
 	}
 
-	// deref rhs if ptr
-	if (lhs.value_type == RAM_TYPE_PTR) {
+	// check if we are dereferencing the rhs
+	if (rhs.value_type == RAM_TYPE_PTR && rhs_deref) {
 		int addr = rhs.types.i;
 		if (addr < 0 || addr >= memory->capacity) {
 			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
@@ -351,9 +351,8 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		ram_free_value(deref_val);
 	}
 
-
-	// if we are doing ptr (addr) + int
-	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT) {
+	// if not dereferencing, then we are doing: (ptr + int_literal)
+	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT && !lhs_deref) {
 		int new_addr = lhs.types.i;
 
 		// addition
@@ -375,10 +374,27 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		return true;
 	}
 
-	// check for invalid pointer operation
-	if (lhs.value_type == RAM_TYPE_PTR || rhs.value_type == RAM_TYPE_PTR) {
-		printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
-		return false;
+	// check other way (int_literal + ptr)
+	if (rhs.value_type == RAM_TYPE_PTR && lhs.value_type == RAM_TYPE_INT && !rhs_deref) {
+		int new_addr = rhs.types.i;
+
+		// addition
+		if (operator == OPERATOR_PLUS) {
+			new_addr += lhs.types.i;
+		}
+		// subtraction
+		else if (operator == OPERATOR_MINUS) {
+			new_addr -= lhs.types.i;
+		}
+		// unsupported
+		else {
+			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
+			return false;
+		}
+
+		result->value_type = RAM_TYPE_PTR;
+		result->types.i = new_addr;
+		return true;
 	}
 
 	// if we are doing something with real and int --> convert int to real
@@ -629,6 +645,7 @@ bool execute_binary_expression(struct EXPR* expr, struct RAM_VALUE* result, stru
 	
 	// get lhs val
 	struct UNARY_EXPR* lhs = expr->lhs;
+	
 	struct RAM_VALUE lhs_val = { .value_type = RAM_TYPE_NONE};
 
 	// check if we got the value correctly, error printed out by retrieve_value()
@@ -653,7 +670,7 @@ bool execute_binary_expression(struct EXPR* expr, struct RAM_VALUE* result, stru
 		return false;
 	}
 
-	return determine_op_result(expr->operator, lhs_val, rhs_val, result, line_num, memory);
+	return determine_op_result(expr->operator, lhs_val, rhs_val, result, line_num, memory, lhs->expr_type == UNARY_PTR_DEREF, rhs->expr_type == UNARY_PTR_DEREF);
 }
 
 //
@@ -748,7 +765,7 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 
 			// check if lhs and rhs indicate pointer arithmetic
 			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
-			expr->rhs->element->element_type == ELEMENT_INT_LITERAL) {
+			expr->rhs->element->element_type == ELEMENT_INT_LITERAL && !expr->lhs->expr_type == UNARY_PTR_DEREF) {
 				stored_value.value_type = RAM_TYPE_PTR;
 			}
 		}
