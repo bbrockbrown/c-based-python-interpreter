@@ -458,173 +458,6 @@ bool handle_pointer_arithmetic(int operator, struct RAM_VALUE lhs, struct RAM_VA
 	return true;
 }
 
-// 
-// handle_pointer_assignment()
-//
-// given the rhs of an assignment of a pointer, handles dereferencing the pointer and performing operations with it, returns
-// T/F depending on success
-//
-bool handle_pointer_assignment(struct STMT_ASSIGNMENT* assignment, struct VALUE* rhs, struct RAM* memory, int line_num) {
-	char* ptr_name = assignment->var_name;
-
-	// make sure ptr exists
-	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
-	if (!ptr_val) {
-		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
-		return false;
-	}
-
-	// make sure var == ptr
-	if (ptr_val->value_type != RAM_TYPE_PTR) {
-		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
-		return false;
-	}
-
-	// make sure addr in range
-	int addr = ptr_val->types.i;
-	if (addr < 0 || addr >= memory->capacity) {
-		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
-		return false;
-	}
-
-	// prepare ram to store this
-	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE };
-
-	// do rhs
-	if (rhs->value_type == VALUE_FUNCTION_CALL) {
-		if (!handle_function(rhs->types.function_call, &stored_value, memory, line_num)) {
-			return false;
-		}
-	} else if (rhs->value_type == VALUE_EXPR) {
-		struct EXPR* expr = rhs->types.expr;
-
-		if (expr->isBinaryExpr) {
-			if (!execute_binary_expression(expr, &stored_value, memory, line_num)) {
-				return false;
-			}
-			} else {
-			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, line_num)) {
-				return false;
-			}
-		}
-	}
-
-	// make sure dereferencing works
-	if (!ram_write_cell_by_addr(memory, stored_value, addr)) {
-		printf("**ERROR: Could not write value to memory location\n");
-		return false;
-	}
-
-	return true; 
-}
-
-//
-// process_rhs()
-//
-// given a rhs of an assignment, properly handles assignment if dealing with expression, single unary expr, etc.
-// returns T/F depending on if successful
-//
-bool process_rhs(struct VALUE* rhs, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
-	// check if its a function call
-	if (rhs->value_type == VALUE_FUNCTION_CALL) {
-		if (!handle_function(rhs->types.function_call, stored_value, memory, line_num)) {
-			return false;
-		}
-	}
-	// check if we are dealing with binary expr or normal assignment
-	else if (rhs->value_type == VALUE_EXPR) {
-		struct EXPR* expr = rhs->types.expr;
-
-		if (expr->isBinaryExpr) {
-			bool success = execute_binary_expression(expr, stored_value, memory, line_num);
-
-			// make sure expr executed
-			if (!success) {
-				return false;
-			}
-
-			// check if lhs and rhs indicate pointer arithmetic
-			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
-			expr->rhs->element->element_type == ELEMENT_INT_LITERAL && !expr->lhs->expr_type == UNARY_PTR_DEREF) {
-				stored_value->value_type = RAM_TYPE_PTR;
-			}
-			
-			return true;
-		}
-
-		// '&' operator
-		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
-			return handle_unary_address_of(expr->lhs, stored_value, memory, line_num);
-		}
-
-		// '*' operator (dereference)
-		if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
-			return handle_unary_pointer_deref(expr->lhs, stored_value, memory, line_num);
-		}
-
-		// normal expression
-		return handle_normal_expression(expr->lhs->element, stored_value, memory, line_num);
-	}
-	
-	return false;
-}
-
-//
-// handle_unary_address_of()
-//
-// given a pointer to a UNARY_EXPR* struct, assigns stored_value to that pointer. returns T/F depending on success
-//
-bool handle_unary_address_of(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
-	bool success = false;
-
-	if (!retrieve_value(expr, memory, stored_value, &success, line_num)) {
-		return false;
-	}
-
-	if (success) {
-		stored_value->value_type = RAM_TYPE_PTR;
-	}
-	return true;
-}
-
-//
-// handle_unary_pointer_deref()
-//
-// given a pointer to a UNARY_EXPR* struct, dereferences the pointer and stores the result in stored_value. returns T/F depending on success
-//
-bool handle_unary_pointer_deref(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
-	char* ptr_name = expr->element->element_value;
-	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
-
-	// make sure ptr is valid
-	if (!ptr_val) {
-		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
-		return false;
-	}
-
-	// check if the variable is actually a pointer
-	if (ptr_val->value_type != RAM_TYPE_PTR) {
-		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
-		return false;
-	}
-
-	int addr = ptr_val->types.i;
-	if (addr < 0 || addr >= memory->capacity) {
-		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
-		return false;
-	}
-
-	struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
-	if (!deref_val) {
-		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
-		return false;
-	}
-
-	*stored_value = *deref_val;
-	ram_free_value(deref_val);
-	return true;
-}
-
 //
 // determine_op_result
 //
@@ -812,7 +645,7 @@ bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE*
 			printf("**ERROR: Unsupported operand type (line %d)\n", line_num); 
 			return false;
 	}
-}	
+}
 
 //
 // execute_binary_expression
@@ -854,6 +687,174 @@ bool execute_binary_expression(struct EXPR* expr, struct RAM_VALUE* result, stru
 	return determine_op_result(expr->operator, lhs_val, rhs_val, result, line_num, memory, lhs->expr_type == UNARY_PTR_DEREF, rhs->expr_type == UNARY_PTR_DEREF);
 }
 
+
+// 
+// handle_pointer_assignment()
+//
+// given the rhs of an assignment of a pointer, handles dereferencing the pointer and performing operations with it, returns
+// T/F depending on success
+//
+bool handle_pointer_assignment(struct STMT_ASSIGNMENT* assignment, struct VALUE* rhs, struct RAM* memory, int line_num) {
+	char* ptr_name = assignment->var_name;
+
+	// make sure ptr exists
+	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
+	if (!ptr_val) {
+		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// make sure var == ptr
+	if (ptr_val->value_type != RAM_TYPE_PTR) {
+		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+		return false;
+	}
+
+	// make sure addr in range
+	int addr = ptr_val->types.i;
+	if (addr < 0 || addr >= memory->capacity) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// prepare ram to store this
+	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE };
+
+	// do rhs
+	if (rhs->value_type == VALUE_FUNCTION_CALL) {
+		if (!handle_function(rhs->types.function_call, &stored_value, memory, line_num)) {
+			return false;
+		}
+	} else if (rhs->value_type == VALUE_EXPR) {
+		struct EXPR* expr = rhs->types.expr;
+
+		if (expr->isBinaryExpr) {
+			if (!execute_binary_expression(expr, &stored_value, memory, line_num)) {
+				return false;
+			}
+			} else {
+			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, line_num)) {
+				return false;
+			}
+		}
+	}
+
+	// make sure dereferencing works
+	if (!ram_write_cell_by_addr(memory, stored_value, addr)) {
+		printf("**ERROR: Could not write value to memory location\n");
+		return false;
+	}
+
+	return true; 
+}
+
+//
+// handle_unary_address_of()
+//
+// given a pointer to a UNARY_EXPR* struct, assigns stored_value to that pointer. returns T/F depending on success
+//
+bool handle_unary_address_of(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	bool success = false;
+
+	if (!retrieve_value(expr, memory, stored_value, &success, line_num)) {
+		return false;
+	}
+
+	if (success) {
+		stored_value->value_type = RAM_TYPE_PTR;
+	}
+	return true;
+}
+
+//
+// handle_unary_pointer_deref()
+//
+// given a pointer to a UNARY_EXPR* struct, dereferences the pointer and stores the result in stored_value. returns T/F depending on success
+//
+bool handle_unary_pointer_deref(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	char* ptr_name = expr->element->element_value;
+	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
+
+	// make sure ptr is valid
+	if (!ptr_val) {
+		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// check if the variable is actually a pointer
+	if (ptr_val->value_type != RAM_TYPE_PTR) {
+		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+		return false;
+	}
+
+	int addr = ptr_val->types.i;
+	if (addr < 0 || addr >= memory->capacity) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+	if (!deref_val) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	*stored_value = *deref_val;
+	ram_free_value(deref_val);
+	return true;
+}
+
+//
+// process_rhs()
+//
+// given a rhs of an assignment, properly handles assignment if dealing with expression, single unary expr, etc.
+// returns T/F depending on if successful
+//
+bool process_rhs(struct VALUE* rhs, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	// check if its a function call
+	if (rhs->value_type == VALUE_FUNCTION_CALL) {
+		if (!handle_function(rhs->types.function_call, stored_value, memory, line_num)) {
+			return false;
+		}
+	}
+	// check if we are dealing with binary expr or normal assignment
+	else if (rhs->value_type == VALUE_EXPR) {
+		struct EXPR* expr = rhs->types.expr;
+
+		if (expr->isBinaryExpr) {
+			bool success = execute_binary_expression(expr, stored_value, memory, line_num);
+
+			// make sure expr executed
+			if (!success) {
+				return false;
+			}
+
+			// check if lhs and rhs indicate pointer arithmetic
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
+			expr->rhs->element->element_type == ELEMENT_INT_LITERAL && !expr->lhs->expr_type == UNARY_PTR_DEREF) {
+				stored_value->value_type = RAM_TYPE_PTR;
+			}
+			
+			return true;
+		}
+
+		// '&' operator
+		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+			return handle_unary_address_of(expr->lhs, stored_value, memory, line_num);
+		}
+
+		// '*' operator (dereference)
+		if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
+			return handle_unary_pointer_deref(expr->lhs, stored_value, memory, line_num);
+		}
+
+		// normal expression
+		return handle_normal_expression(expr->lhs->element, stored_value, memory, line_num);
+	}
+
+	return false;
+}	
+
 //
 // execute_assignment
 //
@@ -882,153 +883,6 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	// if not assignment, then must be function call or expression
 	if (!process_rhs(rhs, &stored_value, memory, stmt->line)) {
 		return false;
-	}
-
-	// write our value to memory
-	if (!ram_write_cell_by_name(memory, stored_value, name)) {
-		printf("**ERROR: Could not write variable to memory. Variable: %s\n", name);
-		if (stored_value.value_type == RAM_TYPE_STR) {
-			free(stored_value.types.s);
-		}
-		return false;
-	}
-
-	// successful assignment
-	return true;
-
-
-
-	////////////////////////////////////////////////////////////////////////////////////////////////////
-	// check if we are doing pointer-based assignment (*p = ...)
-	if (assignment->isPtrDeref) {
-		char* ptr_name = assignment->var_name;
-
-		// make sure ptr exists
-		struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
-		if (!ptr_val) {
-			printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, stmt->line);
-			return false;
-		}
-
-		// make sure var == ptr
-		if (ptr_val->value_type != RAM_TYPE_PTR) {
-			printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", stmt->line);
-			return false;
-		}
-
-		// make sure addr in range
-		int addr = ptr_val->types.i;
-		if (addr < 0 || addr >= memory->capacity) {
-			printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
-			return false;
-		}
-
-		// do rhs
-		if (rhs->value_type == VALUE_FUNCTION_CALL) {
-			if (!handle_function(rhs->types.function_call, &stored_value, memory, stmt->line)) {
-				return false;
-			}
-		} else if (rhs->value_type == VALUE_EXPR) {
-			struct EXPR* expr = rhs->types.expr;
-
-			if (expr->isBinaryExpr) {
-				if (!execute_binary_expression(expr, &stored_value, memory, stmt->line)) {
-					return false;
-				}
-				} else {
-				if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
-					return false;
-				}
-			}
-		}
-
-		// make sure dereferencing works
-		if (!ram_write_cell_by_addr(memory, stored_value, addr)) {
-			printf("**ERROR: Could not write value to memory location\n");
-			return false;
-		}
-
-		return true; // Successful pointer-based assignment, no need to modify pointer itself
-	}
-
-	// check if its a function call
-	if (rhs->value_type == VALUE_FUNCTION_CALL) {
-		if (!handle_function(rhs->types.function_call, &stored_value, memory, stmt->line)) {
-			return false;
-		}
-	}
-	// check if we are dealing with binary expr or normal assignment
-	else if (rhs->value_type == VALUE_EXPR) {
-		struct EXPR* expr = rhs->types.expr;
-
-		if (expr->isBinaryExpr) {
-			bool success = execute_binary_expression(expr, &stored_value, memory, stmt->line);
-
-			// make sure expr executed
-			if (!success) {
-				return false;
-			}
-
-			// check if lhs and rhs indicate pointer arithmetic
-			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
-			expr->rhs->element->element_type == ELEMENT_INT_LITERAL && !expr->lhs->expr_type == UNARY_PTR_DEREF) {
-				stored_value.value_type = RAM_TYPE_PTR;
-			}
-		}
-
-		// '&' operator
-		else if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
-			struct UNARY_EXPR* lhs = expr->lhs;
-			bool success = false;
-
-			if (!retrieve_value(lhs, memory, &stored_value, &success, stmt->line)) {
-				return false;
-			}
-
-			if (success) {
-				stored_value.value_type = RAM_TYPE_PTR;
-			}
-		}
-
-		// '*' operator (dereference)
-		else if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
-			char* ptr_name = expr->lhs->element->element_value;
-			struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
-
-			// make sure ptr is valid
-			if (!ptr_val) {
-				printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, stmt->line);
-				return false;
-			}
-
-			// check if the variable is actually a pointer
-			if (ptr_val->value_type != RAM_TYPE_PTR) {
-				printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", stmt->line);
-				return false;
-			}
-
-			int addr = ptr_val->types.i;
-			if (addr < 0 || addr >= memory->capacity) {
-				printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
-				return false;
-			}
-
-			struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
-			if (!deref_val) {
-				printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, stmt->line);
-				return false;
-			}
-
-			stored_value = *deref_val;
-			ram_free_value(deref_val);
-		}
-
-		// normal expression
-		else {
-			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, stmt->line)) {
-				return false;
-			}
-		}
 	}
 
 	// write our value to memory
