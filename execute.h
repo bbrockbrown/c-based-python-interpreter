@@ -59,12 +59,87 @@ bool string_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 //
 bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
+//
+// change_numeric_types()
+//
+// given two pointers to RAM_VALUE structs representing the lhs & rhs, changes the value_type of these structs depending
+// on the combination of values (int & real --> both real)
+//
+void change_numeric_types(struct RAM_VALUE* lhs, struct RAM_VALUE* rhs);
+
+// 
+// handle_integer_ops()
+//
+// given an operator and lhs & rhs, performs any supported operations between two integers and modifies the result via 
+// a pointer, returning T/F depending on successfulness
+bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
+
+// 
+// handle_real_ops()
+//
+// given an operator and lhs & rhs, performs any supported operations between two real numbers and modifies the result via 
+// a pointer, returning T/F depending on successfulness
+bool handle_real_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
+
+// 
+// is_relational_op()
+//
+// given an operator, returns T/F depending on if the operator is a relational operator
+//
+bool is_relational_op(int operator);
+
+//
+// deref_pointer()
+//
+// given a pointer to a RAM_VALUE struct, dereferences the pointer and returns a bool depending on if successful or not
+//
+bool deref_pointer(struct RAM_VALUE* value, struct RAM* memory, int line_num);
+
+//
+// handle_pointer_arithmetic()
+//
+// given two RAM_VALUE structs that represent a pointer and int, adds the int value to the pointer value to represent
+// changing the address of the pointer. Modifies the result via a pointer and returns bool depending on success
+//
+bool handle_pointer_arithmetic(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
+
+// 
+// handle_pointer_assignment()
+//
+// given the rhs of an assignment of a pointer, handles dereferencing the pointer and performing operations with it, returns
+// T/F depending on success
+//
+bool handle_pointer_assignment(struct STMT_ASSIGNMENT* assignment, struct VALUE* rhs, struct RAM* memory, int line_num);
+
+//
+// process_rhs()
+//
+// given a rhs of an assignment, properly handles assignment if dealing with expression, single unary expr, etc.
+// returns T/F depending on if successful
+//
+bool process_rhs(struct VALUE* rhs, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
+
+//
+// handle_unary_address_of()
+//
+// given a pointer to a UNARY_EXPR* struct, assigns stored_value to that pointer. returns T/F depending on success
+//
+bool handle_unary_address_of(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
+
+//
+// handle_unary_pointer_deref()
+//
+// given a pointer to a UNARY_EXPR* struct, dereferences the pointer and stores the result in stored_value. returns T/F depending on success
+//
+bool handle_unary_pointer_deref(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
+
 // determine_op_result
 //
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
 // all types of variables when doing +, -, *, /, **, and %. 
 //
 bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory, bool lhs_deref, bool rhs_deref);
+
 //
 // retrieve_value
 //

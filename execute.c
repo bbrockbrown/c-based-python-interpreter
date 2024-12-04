@@ -291,13 +291,349 @@ bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 }
 
 //
+// change_numeric_types()
+//
+// given two pointers to RAM_VALUE structs representing the lhs & rhs, changes the value_type of these structs depending
+// on the combination of values (int & real --> both real)
+//
+void change_numeric_types(struct RAM_VALUE* lhs, struct RAM_VALUE* rhs) {
+	// if we are doing something with real and int --> convert int to real
+	if (lhs->value_type == RAM_TYPE_INT && rhs->value_type == RAM_TYPE_REAL) {
+		lhs->types.d = (double)lhs->types.i;
+		lhs->value_type = RAM_TYPE_REAL;
+	} 
+	else if (lhs->value_type == RAM_TYPE_REAL && rhs->value_type == RAM_TYPE_INT) {
+		rhs->types.d = (double)rhs->types.i;
+		rhs->value_type = RAM_TYPE_REAL;
+	}
+}
+
+// 
+// handle_integer_ops()
+//
+// given an operator and lhs & rhs, performs any supported operations between two integers and modifies the result via 
+// a pointer, returning T/F depending on successfulness
+bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
+	result->value_type = RAM_TYPE_INT;
+	switch (operator) {
+		// we are doing (+) or (-) or (*)
+		case OPERATOR_PLUS:    result->types.i = lhs.types.i + rhs.types.i; break;
+		case OPERATOR_MINUS:   result->types.i = lhs.types.i - rhs.types.i; break;
+		case OPERATOR_ASTERISK: result->types.i = lhs.types.i * rhs.types.i; break;
+
+		// we are doing division
+		case OPERATOR_DIV:
+			if (rhs.types.i == 0) {
+				printf("**ZeroDivisionError: division by zero (line %d)\n", line_num);
+				return false;
+			}
+			result->types.i = lhs.types.i / rhs.types.i;
+			break;
+
+		// we are doing modulo
+		case OPERATOR_MOD:
+			result->types.i = lhs.types.i % rhs.types.i;
+			break;
+
+		// we are doing pow(a, b)
+		case OPERATOR_POWER:
+			result->types.i = (int)pow(lhs.types.i, rhs.types.i);
+			break;
+
+		// unknown operator
+		default:
+			printf("**ERROR: Unsupported operator (line %d)\n", line_num);
+			return false;
+	}
+	return true;
+}
+
+// 
+// handle_real_ops()
+//
+// given an operator and lhs & rhs, performs any supported operations between two real numbers and modifies the result via 
+// a pointer, returning T/F depending on successfulness
+bool handle_real_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
+	result->value_type = RAM_TYPE_REAL;
+	switch (operator) {
+		// we are doing (+) or (-) or (*)
+		case OPERATOR_PLUS:    result->types.d = lhs.types.d + rhs.types.d; break;
+		case OPERATOR_MINUS:   result->types.d = lhs.types.d - rhs.types.d; break;
+		case OPERATOR_ASTERISK: result->types.d = lhs.types.d * rhs.types.d; break;
+
+		// we are doing division
+		case OPERATOR_DIV: {
+			if (rhs.types.d == 0.0) {
+				printf("**ZeroDivisionError: division by zero (line %d)\n", line_num);
+				return false;
+			}
+			result->types.d = lhs.types.d / rhs.types.d;
+			break;
+		}
+
+		// we are doing modulo
+		case OPERATOR_MOD:
+			result->types.d = fmod(lhs.types.d, rhs.types.d);
+			break;
+
+		// we are doing pow(a, b)
+		case OPERATOR_POWER: {
+			result->types.d = pow(lhs.types.d, rhs.types.d);
+			break;
+		}
+
+		// unknown operator
+		default: {
+			printf("**ERROR: Unsupported operator (line %d)\n", line_num);
+			return false;
+		}
+	}
+	return true;
+}
+
+// 
+// is_relational_op()
+//
+// given an operator, returns T/F depending on if the operator is a relational operator
+//
+bool is_relational_op(int operator) {
+	return operator == OPERATOR_EQUAL ||
+		operator == OPERATOR_NOT_EQUAL ||
+		operator == OPERATOR_LT ||
+		operator == OPERATOR_LTE ||
+		operator == OPERATOR_GT ||
+		operator == OPERATOR_GTE;
+}
+
+//
+// deref_pointer()
+//
+// given a pointer to a RAM_VALUE struct, dereferences the pointer and returns a bool depending on if successful or not
+//
+bool deref_pointer(struct RAM_VALUE* value, struct RAM* memory, int line_num) {
+	if (value->value_type != RAM_TYPE_PTR) return true;
+	int addr = value->types.i;
+	if (addr < 0 || addr >= memory->capacity) {
+		printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+		return false;
+	}
+	
+	struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+	if (!deref_val) {
+		printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
+		return false;
+	}
+
+	*value = *deref_val;
+	ram_free_value(deref_val);
+	return true;
+}
+
+//
+// handle_pointer_arithmetic()
+//
+// given two RAM_VALUE structs that represent a pointer and int, adds the int value to the pointer value to represent
+// changing the address of the pointer. Modifies the result via a pointer and returns bool depending on success
+//
+bool handle_pointer_arithmetic(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
+	int new_addr = (lhs.value_type == RAM_TYPE_PTR) ? lhs.types.i : rhs.types.i;
+	int to_add = (lhs.value_type == RAM_TYPE_INT) ? lhs.types.i : rhs.types.i;
+
+	// we are adding
+	if (operator == OPERATOR_PLUS) {
+		new_addr += to_add;
+	}
+	// subtracting
+	else if (operator == OPERATOR_MINUS) {
+		new_addr -= to_add;
+	}
+	// unsupported operator
+	else {
+		printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
+		return false;
+	}
+
+	result->value_type = RAM_TYPE_PTR;
+	result->types.i = new_addr;
+	return true;
+}
+
+// 
+// handle_pointer_assignment()
+//
+// given the rhs of an assignment of a pointer, handles dereferencing the pointer and performing operations with it, returns
+// T/F depending on success
+//
+bool handle_pointer_assignment(struct STMT_ASSIGNMENT* assignment, struct VALUE* rhs, struct RAM* memory, int line_num) {
+	char* ptr_name = assignment->var_name;
+
+	// make sure ptr exists
+	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
+	if (!ptr_val) {
+		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// make sure var == ptr
+	if (ptr_val->value_type != RAM_TYPE_PTR) {
+		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+		return false;
+	}
+
+	// make sure addr in range
+	int addr = ptr_val->types.i;
+	if (addr < 0 || addr >= memory->capacity) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// prepare ram to store this
+	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE };
+
+	// do rhs
+	if (rhs->value_type == VALUE_FUNCTION_CALL) {
+		if (!handle_function(rhs->types.function_call, &stored_value, memory, line_num)) {
+			return false;
+		}
+	} else if (rhs->value_type == VALUE_EXPR) {
+		struct EXPR* expr = rhs->types.expr;
+
+		if (expr->isBinaryExpr) {
+			if (!execute_binary_expression(expr, &stored_value, memory, line_num)) {
+				return false;
+			}
+			} else {
+			if (!handle_normal_expression(expr->lhs->element, &stored_value, memory, line_num)) {
+				return false;
+			}
+		}
+	}
+
+	// make sure dereferencing works
+	if (!ram_write_cell_by_addr(memory, stored_value, addr)) {
+		printf("**ERROR: Could not write value to memory location\n");
+		return false;
+	}
+
+	return true; 
+}
+
+//
+// process_rhs()
+//
+// given a rhs of an assignment, properly handles assignment if dealing with expression, single unary expr, etc.
+// returns T/F depending on if successful
+//
+bool process_rhs(struct VALUE* rhs, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	// check if its a function call
+	if (rhs->value_type == VALUE_FUNCTION_CALL) {
+		if (!handle_function(rhs->types.function_call, stored_value, memory, line_num)) {
+			return false;
+		}
+	}
+	// check if we are dealing with binary expr or normal assignment
+	else if (rhs->value_type == VALUE_EXPR) {
+		struct EXPR* expr = rhs->types.expr;
+
+		if (expr->isBinaryExpr) {
+			bool success = execute_binary_expression(expr, stored_value, memory, line_num);
+
+			// make sure expr executed
+			if (!success) {
+				return false;
+			}
+
+			// check if lhs and rhs indicate pointer arithmetic
+			if (expr->lhs->element->element_type == ELEMENT_IDENTIFIER &&
+			expr->rhs->element->element_type == ELEMENT_INT_LITERAL && !expr->lhs->expr_type == UNARY_PTR_DEREF) {
+				stored_value->value_type = RAM_TYPE_PTR;
+			}
+			
+			return true;
+		}
+
+		// '&' operator
+		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+			return handle_unary_address_of(expr->lhs, stored_value, memory, line_num);
+		}
+
+		// '*' operator (dereference)
+		if (expr->lhs->expr_type == UNARY_PTR_DEREF) {
+			return handle_unary_pointer_deref(expr->lhs, stored_value, memory, line_num);
+		}
+
+		// normal expression
+		return handle_normal_expression(expr->lhs->element, stored_value, memory, line_num);
+	}
+	
+	return false;
+}
+
+//
+// handle_unary_address_of()
+//
+// given a pointer to a UNARY_EXPR* struct, assigns stored_value to that pointer. returns T/F depending on success
+//
+bool handle_unary_address_of(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	bool success = false;
+
+	if (!retrieve_value(expr, memory, stored_value, &success, line_num)) {
+		return false;
+	}
+
+	if (success) {
+		stored_value->value_type = RAM_TYPE_PTR;
+	}
+	return true;
+}
+
+//
+// handle_unary_pointer_deref()
+//
+// given a pointer to a UNARY_EXPR* struct, dereferences the pointer and stores the result in stored_value. returns T/F depending on success
+//
+bool handle_unary_pointer_deref(struct UNARY_EXPR* expr, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
+	char* ptr_name = expr->element->element_value;
+	struct RAM_VALUE* ptr_val = ram_read_cell_by_name(memory, ptr_name);
+
+	// make sure ptr is valid
+	if (!ptr_val) {
+		printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	// check if the variable is actually a pointer
+	if (ptr_val->value_type != RAM_TYPE_PTR) {
+		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+		return false;
+	}
+
+	int addr = ptr_val->types.i;
+	if (addr < 0 || addr >= memory->capacity) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
+	if (!deref_val) {
+		printf("**SEMANTIC ERROR: '%s' contains invalid address (line %d)\n", ptr_name, line_num);
+		return false;
+	}
+
+	*stored_value = *deref_val;
+	ram_free_value(deref_val);
+	return true;
+}
+
+//
 // determine_op_result
 //
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
 // all types of variables when doing +, -, *, /, **, and %. 
-// OVER 100!
+// 
 bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory, bool lhs_deref, bool rhs_deref) {
 	// see what types are in the operation
+	// handle any string operations
 	if (lhs.value_type == RAM_TYPE_STR || rhs.value_type == RAM_TYPE_STR) {
 		// both operands are strings and operation is (+) --> string concat
 		if (operator == OPERATOR_PLUS && lhs.value_type == RAM_TYPE_STR && rhs.value_type == RAM_TYPE_STR) {
@@ -315,185 +651,34 @@ bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rh
 		return false;
 	}
 
-	// check if we are dereferencing the lhs
-	if (lhs.value_type == RAM_TYPE_PTR && lhs_deref) {
-		int addr = lhs.types.i;
-		if (addr < 0 || addr >= memory->capacity) {
-			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
-			return false;
-		}
-		
-		struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
-		if (!deref_val) {
-			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
-			return false;
-		}
+	// check if we are dereferencing any pointers if needed
+	if (lhs_deref && !deref_pointer(&lhs, memory, line_num)) return false;
+	if (rhs_deref && !deref_pointer(&rhs, memory, line_num)) return false;
 
-		lhs = *deref_val;
-		ram_free_value(deref_val);
+	// handle pointer arithmetic if we are adding numbers to a pointer (change address)
+	if ((lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT && !lhs_deref) || 
+	(rhs.value_type == RAM_TYPE_PTR && lhs.value_type == RAM_TYPE_INT && !rhs_deref)) {
+		return handle_pointer_arithmetic(operator, lhs, rhs, result, line_num);
 	}
 
-	// check if we are dereferencing the rhs
-	if (rhs.value_type == RAM_TYPE_PTR && rhs_deref) {
-		int addr = rhs.types.i;
-		if (addr < 0 || addr >= memory->capacity) {
-			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
-			return false;
-		}
-		
-		struct RAM_VALUE* deref_val = ram_read_cell_by_addr(memory, addr);
-		if (!deref_val) {
-			printf("**SEMANTIC ERROR: lhs pointer contains invalid address (line %d)\n", line_num);
-			return false;
-		}
+	// check if we need to change from int --> real and perform operation
+	change_numeric_types(&lhs, &rhs);
 
-		rhs = *deref_val;
-		ram_free_value(deref_val);
-	}
-
-	// if not dereferencing, then we are doing: (ptr + int_literal)
-	if (lhs.value_type == RAM_TYPE_PTR && rhs.value_type == RAM_TYPE_INT && !lhs_deref) {
-		int new_addr = lhs.types.i;
-
-		// addition
-		if (operator == OPERATOR_PLUS) {
-			new_addr += rhs.types.i;
-		}
-		// subtraction
-		else if (operator == OPERATOR_MINUS) {
-			new_addr -= rhs.types.i;
-		}
-		// unsupported
-		else {
-			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
-			return false;
-		}
-
-		result->value_type = RAM_TYPE_PTR;
-		result->types.i = new_addr;
-		return true;
-	}
-
-	// check other way (int_literal + ptr)
-	if (rhs.value_type == RAM_TYPE_PTR && lhs.value_type == RAM_TYPE_INT && !rhs_deref) {
-		int new_addr = rhs.types.i;
-
-		// addition
-		if (operator == OPERATOR_PLUS) {
-			new_addr += lhs.types.i;
-		}
-		// subtraction
-		else if (operator == OPERATOR_MINUS) {
-			new_addr -= lhs.types.i;
-		}
-		// unsupported
-		else {
-			printf("**SEMANTIC ERROR: invalid operand types for pointer arithmetic (line %d)\n", line_num);
-			return false;
-		}
-
-		result->value_type = RAM_TYPE_PTR;
-		result->types.i = new_addr;
-		return true;
-	}
-
-	// if we are doing something with real and int --> convert int to real
-	if (lhs.value_type == RAM_TYPE_INT && rhs.value_type == RAM_TYPE_REAL) {
-		lhs.types.d = (double)lhs.types.i;
-		lhs.value_type = RAM_TYPE_REAL;
-	} else if (lhs.value_type == RAM_TYPE_REAL && rhs.value_type == RAM_TYPE_INT) {
-		rhs.types.d = (double)rhs.types.i;
-		rhs.value_type = RAM_TYPE_REAL;
-	}
-
-	// first see if we are doing something relational with numbers
-	if (operator == OPERATOR_EQUAL || operator == OPERATOR_NOT_EQUAL || operator == OPERATOR_LT ||
-	operator == OPERATOR_LTE || operator == OPERATOR_GT || operator == OPERATOR_GTE) {
+	// check if we are dealing with relational operators
+	if (is_relational_op(operator)) {
 		return number_comparison(operator, lhs, rhs, result, line_num);
 	}
 
-	// do operation
-	// dealing with two ints
 	if (lhs.value_type == RAM_TYPE_INT && rhs.value_type == RAM_TYPE_INT) {
-		result->value_type = RAM_TYPE_INT;
-		switch (operator) {
-			// we are doing (+) or (-) or (*)
-			case OPERATOR_PLUS:    result->types.i = lhs.types.i + rhs.types.i; break;
-			case OPERATOR_MINUS:   result->types.i = lhs.types.i - rhs.types.i; break;
-			case OPERATOR_ASTERISK: result->types.i = lhs.types.i * rhs.types.i; break;
-
-			// we are doing division
-			case OPERATOR_DIV:
-				if (rhs.types.i == 0) {
-					printf("**ZeroDivisionError: division by zero (line %d)\n", line_num);
-					return false;
-				}
-				result->types.i = lhs.types.i / rhs.types.i;
-				break;
-
-			// we are doing modulo
-			case OPERATOR_MOD:
-				result->types.i = lhs.types.i % rhs.types.i;
-				break;
-
-			// we are doing pow(a, b)
-			case OPERATOR_POWER:
-				result->types.i = (int)pow(lhs.types.i, rhs.types.i);
-				break;
-
-			// unknown operator
-			default:
-				printf("**ERROR: Unsupported operator (line %d)\n", line_num);
-				return false;
-			}
+		return handle_integer_ops(operator, lhs, rhs, result, line_num);
 	}
-
-	// we are dealing with two reals (one of them mightve used to be an int)
 	else if (lhs.value_type == RAM_TYPE_REAL && rhs.value_type == RAM_TYPE_REAL) {
-		result->value_type = RAM_TYPE_REAL;
-		switch (operator) {
-			// we are doing (+) or (-) or (*)
-			case OPERATOR_PLUS:    result->types.d = lhs.types.d + rhs.types.d; break;
-			case OPERATOR_MINUS:   result->types.d = lhs.types.d - rhs.types.d; break;
-			case OPERATOR_ASTERISK: result->types.d = lhs.types.d * rhs.types.d; break;
-
-			// we are doing division
-			case OPERATOR_DIV: {
-				if (rhs.types.d == 0.0) {
-					printf("**ZeroDivisionError: division by zero (line %d)\n", line_num);
-					return false;
-				}
-				result->types.d = lhs.types.d / rhs.types.d;
-				break;
-			}
-
-			// we are doing modulo
-			case OPERATOR_MOD:
-				result->types.d = fmod(lhs.types.d, rhs.types.d);
-				break;
-
-			// we are doing pow(a, b)
-			case OPERATOR_POWER: {
-				result->types.d = pow(lhs.types.d, rhs.types.d);
-				break;
-			}
-
-			// unknown operator
-			default: {
-				printf("**ERROR: Unsupported operator (line %d)\n", line_num);
-				return false;
-			}
-		}
-	} 
-
-	// unsupported operator for given operands
-	else {
-		printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
-		return false;
+		return handle_real_ops(operator, lhs, rhs, result, line_num);
 	}
 
-	// did operation correctly
-	return true;
+	// otherwise unsupported 
+	printf("**SEMANTIC ERROR: invalid operand types (line %d)\n", line_num);
+	return false;
 }
 
 
@@ -569,9 +754,6 @@ bool retrieve_value(struct UNARY_EXPR* op, struct RAM* memory, struct RAM_VALUE*
 			*success = true;
 			return true;
 		}
-
-		// elt is the '&' operator
-		
 
 		// elt is a real literal
 		case ELEMENT_REAL_LITERAL: {
@@ -653,7 +835,6 @@ bool execute_binary_expression(struct EXPR* expr, struct RAM_VALUE* result, stru
 		return false;
 	}
 	
-	
 	// make sure it is a binary expression
 	// if not, copy lhs directly
 	if (!expr->isBinaryExpr) {
@@ -693,6 +874,31 @@ bool execute_assignment(struct STMT* stmt, struct RAM* memory) {
 	// prepare ram to store this
 	struct RAM_VALUE stored_value = { .value_type = RAM_TYPE_NONE };
 
+	// check if we are doing pointer-based assignment (*p = ...)
+	if (assignment->isPtrDeref) {
+		return handle_pointer_assignment(assignment, rhs, memory, stmt->line);
+	}
+
+	// if not assignment, then must be function call or expression
+	if (!process_rhs(rhs, &stored_value, memory, stmt->line)) {
+		return false;
+	}
+
+	// write our value to memory
+	if (!ram_write_cell_by_name(memory, stored_value, name)) {
+		printf("**ERROR: Could not write variable to memory. Variable: %s\n", name);
+		if (stored_value.value_type == RAM_TYPE_STR) {
+			free(stored_value.types.s);
+		}
+		return false;
+	}
+
+	// successful assignment
+	return true;
+
+
+
+	////////////////////////////////////////////////////////////////////////////////////////////////////
 	// check if we are doing pointer-based assignment (*p = ...)
 	if (assignment->isPtrDeref) {
 		char* ptr_name = assignment->var_name;
