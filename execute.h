@@ -20,42 +20,48 @@
 //
 // handle_function()
 //
-// helper function responsible for handling the Python 'input()', 'float()', and 'int()' functions
+// Helper function responsible for handling the Python 'input()', 'float()', and 'int()' functions. Modifies stored
+// value via a pointer and returns T/F depending on if successful.
 //
 bool handle_function(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
 
 //
 // handle_conversion()
 //
-// helper function that performs the converion from string to int/float, denoted by int(s) or float(s)
+// Helper function that performs the converion from string to int/float, denoted by int(s) or float(s)
+// Modifies the values via pointers and returns T/F depending on if successful. 
 //
 bool handle_conversion(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
 
 //
 // handle_normal_expression()
 //
-// helper function responsible for handling normal expression/assignment
+// Helper function responsible for handling normal expression/assignment. Modifies the stored_value (result) via a pointer
+// and returns T/F depending on if the function returned successfully.
 //
 bool handle_normal_expression(struct ELEMENT* rhs_elt, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num);
 
 //
 // string_concat()
 //
-// helper function to handle string concatenation
+// Helper function to handle string concatenation. Takes in LHS and RHS (the two strings we want to concat) 
+// and stores the result in a pointer to result. Returns T/F depending on if successful.
 //
 bool string_concat(struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
 //
 // string_comparison()
 //
-// helper function to handle string comparison
+// Helper function to handle string comparison. Takes in two strings (LHS and RHS) and computes the result, storing
+// it in a pointer to 'result'. Returns T/F depending on if successful.
 //
 bool string_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
 //
 // number_comparison()
 //
-// helper function to handle comparison between numbers
+// Helper function to handle comparison between numbers. Takes in two numbers (LHS and RHS) and computes the result, storing
+// it in a pointer to 'result'. Returns T/F depending on if successful. 
 //
 bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
@@ -72,6 +78,7 @@ void change_numeric_types(struct RAM_VALUE* lhs, struct RAM_VALUE* rhs);
 //
 // given an operator and lhs & rhs, performs any supported operations between two integers and modifies the result via 
 // a pointer, returning T/F depending on successfulness
+//
 bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
 // 
@@ -79,6 +86,7 @@ bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs
 //
 // given an operator and lhs & rhs, performs any supported operations between two real numbers and modifies the result via 
 // a pointer, returning T/F depending on successfulness
+//
 bool handle_real_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num);
 
 // 
@@ -136,7 +144,7 @@ bool handle_unary_pointer_deref(struct UNARY_EXPR* expr, struct RAM_VALUE* store
 // determine_op_result
 //
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
-// all types of variables when doing +, -, *, /, **, and %. 
+// all types of variables when doing +, -, *, /, **, and %. Returns whether it was successful or not
 //
 bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory, bool lhs_deref, bool rhs_deref);
 

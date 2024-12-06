@@ -6,7 +6,9 @@
 //    execute() only handles assignments, function calls, and 'pass'. Although 
 //    functionality is somehwat limited, this form of execute() is still able to
 //    handle binary expressions, including ones with variables stored in RAM. 
-//	Can only do simple function calls e.g. print(), float(), int(), and input().			   >>
+//	Can only do simple function calls e.g. print(), float(), int(), and input(). Additionally,
+//	this python interpreter supports pointers in python, including assigning variables
+//    to memory addresses, dereferencing pointers, and any combination of the two.			   >>
 //
 // << Brock Brown >>
 // << Northwestern University >>
@@ -36,7 +38,8 @@
 // str_dup() 
 //
 // Allocates memory for a 'duplicate' string and returns it. Had to write this sicne
-// the compiler was not recognizing the version from '<string.h>'
+// the compiler was not recognizing the version from '<string.h>'. Returns copy
+// of the string passed into the function
 //
 char* strdup(const char* word) {
 	if (word == NULL) return NULL; 
@@ -51,7 +54,8 @@ char* strdup(const char* word) {
 //
 // handle_conversion()
 //
-// helper function that performs the converion from string to int/float, denoted by int(s) or float(s)
+// Helper function that performs the converion from string to int/float, denoted by int(s) or float(s).
+// Modifies the values via pointers and returns T/F depending on if successful. 
 //
 bool handle_conversion(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
 	char* var_name = func_call->parameter->element_value;
@@ -87,7 +91,8 @@ bool handle_conversion(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored
 //
 // handle_function()
 //
-// helper function responsible for handling the Python 'input()', 'float()', and 'int()' functions
+// Helper function responsible for handling the Python 'input()', 'float()', and 'int()' functions. Modifies stored
+// value via a pointer and returns T/F depending on if successful.
 //
 bool handle_function(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
 	if (strcmp(func_call->function_name, "input") == 0) {
@@ -125,7 +130,8 @@ bool handle_function(struct FUNCTION_CALL* func_call, struct RAM_VALUE* stored_v
 //
 // handle_normal_expression()
 //
-// helper function responsible for handling normal expression/assignment
+// Helper function responsible for handling normal expression/assignment. Modifies the stored_value (result) via a pointer
+// and returns T/F depending on if the function returned successfully.
 //
 bool handle_normal_expression(struct ELEMENT* rhs_elt, struct RAM_VALUE* stored_value, struct RAM* memory, int line_num) {
 	switch (rhs_elt->element_type) {
@@ -195,7 +201,8 @@ bool handle_normal_expression(struct ELEMENT* rhs_elt, struct RAM_VALUE* stored_
 //
 // string_concat()
 //
-// helper function to handle string concatenation
+// Helper function to handle string concatenation. Takes in LHS and RHS (the two strings we want to concat) 
+// and stores the result in a pointer to result. Returns T/F depending on if successful.
 //
 bool string_concat(struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
 	// we are doing string concat
@@ -215,7 +222,8 @@ bool string_concat(struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE*
 //
 // string_comparison()
 //
-// helper function to handle string comparison
+// Helper function to handle string comparison. Takes in two strings (LHS and RHS) and computes the result, storing
+// it in a pointer to 'result'. Returns T/F depending on if successful.
 //
 bool string_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
 	int comparison = strcmp(lhs.types.s, rhs.types.s);
@@ -250,7 +258,8 @@ bool string_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs,
 //
 // number_comparison()
 //
-// helper function to handle comparison between numbers
+// Helper function to handle comparison between numbers. Takes in two numbers (LHS and RHS) and computes the result, storing
+// it in a pointer to 'result'. Returns T/F depending on if successful. 
 //
 bool number_comparison(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
 	result->value_type = RAM_TYPE_BOOLEAN;
@@ -313,6 +322,7 @@ void change_numeric_types(struct RAM_VALUE* lhs, struct RAM_VALUE* rhs) {
 //
 // given an operator and lhs & rhs, performs any supported operations between two integers and modifies the result via 
 // a pointer, returning T/F depending on successfulness
+//
 bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
 	result->value_type = RAM_TYPE_INT;
 	switch (operator) {
@@ -353,6 +363,7 @@ bool handle_integer_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs
 //
 // given an operator and lhs & rhs, performs any supported operations between two real numbers and modifies the result via 
 // a pointer, returning T/F depending on successfulness
+//
 bool handle_real_ops(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num) {
 	result->value_type = RAM_TYPE_REAL;
 	switch (operator) {
@@ -461,7 +472,7 @@ bool handle_pointer_arithmetic(int operator, struct RAM_VALUE lhs, struct RAM_VA
 // determine_op_result
 //
 // Given an operator, lhs & rhs, line number, and a pointer to a result of RAM_VALUE, this function handles
-// all types of variables when doing +, -, *, /, **, and %. 
+// all types of variables when doing +, -, *, /, **, and %. Returns whether it was successful or not
 // 
 bool determine_op_result(int operator, struct RAM_VALUE lhs, struct RAM_VALUE rhs, struct RAM_VALUE* result, int line_num, struct RAM* memory, bool lhs_deref, bool rhs_deref) {
 	// see what types are in the operation
@@ -727,7 +738,26 @@ bool handle_pointer_assignment(struct STMT_ASSIGNMENT* assignment, struct VALUE*
 	} else if (rhs->value_type == VALUE_EXPR) {
 		struct EXPR* expr = rhs->types.expr;
 
-		if (expr->isBinaryExpr) {
+		// check if we are getting an address
+		if (expr->lhs->expr_type == UNARY_ADDRESS_OF) {
+			struct UNARY_EXPR* unary_expr = expr->lhs;
+
+			// get address of var
+			char* target_name = unary_expr->element->element_value;
+			int target_addr = ram_get_addr(memory, target_name);
+
+			// validate  target address
+			if (target_addr == -1 || target_addr >= memory->capacity) {
+				printf("**SEMANTIC ERROR: name '%s' is not defined (line %d)\n", target_name, line_num);
+				return false;
+			}
+
+			// Store the address in the dereferenced pointer
+			stored_value.value_type = RAM_TYPE_PTR;
+			stored_value.types.i = target_addr;
+		}
+
+		else if (expr->isBinaryExpr) {
 			if (!execute_binary_expression(expr, &stored_value, memory, line_num)) {
 				return false;
 			}
